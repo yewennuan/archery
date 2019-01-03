@@ -282,33 +282,6 @@ class InceptionDao(object):
             conn.close()
         return result
 
-    def get_osc_percent(self, sql_sha1):
-        """
-        已知SHA1值，去inception里查看OSC进度
-        """
-        sql_str = "inception get osc_percent '%s'" % sql_sha1
-        result = self._fetchall(sql_str, self.inception_host, self.inception_port, '', '', '')
-        if len(result) > 0:
-            percent = result[0][3]
-            time_remained = result[0][4]
-            pct_result = {"status": 0, "msg": "ok", "data": {"percent": percent, "time_remained": time_remained}}
-        else:
-            pct_result = {"status": 1, "msg": "没找到该SQL的进度信息，是否已经执行完毕？",
-                          "data": {"percent": -100, "time_remained": -100}}
-        return pct_result
-
-    def stop_osc_progress(self, sql_sha1):
-        """
-        已知SHA1值，调用inception命令停止OSC进程，涉及的Inception命令和注意事项，请参考http://mysql-inception.github.io/inception-document/osc/
-        """
-        sql_str = "inception stop alter '%s'" % sql_sha1
-        result = self._fetchall(sql_str, self.inception_host, self.inception_port, '', '', '')
-        if result is not None:
-            opt_result = {"status": 0, "msg": "已成功停止OSC进程，请注意清理触发器和临时表，先清理触发器再删除临时表", "data": ""}
-        else:
-            opt_result = {"status": 1, "msg": "ERROR 2624 (HY000):未找到OSC执行进程，可能已经执行完成", "data": ""}
-        return opt_result
-
     def query_print(self, sql_content, db_name):
         """
         将sql交给inception打印语法树。

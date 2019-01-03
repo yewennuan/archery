@@ -110,26 +110,6 @@ def detail(request, workflow_id):
         # row['sqlsha1'] = row_item[10]
         rows.append(row)
 
-        if workflow_detail.status == '执行中':
-            row['stagestatus'] = ''.join(
-                ["<div id=\"td_" + str(row['ID']) + "\" class=\"form-inline\">",
-                 "   <div class=\"progress form-group\" style=\"width: 80%; height: 18px; float: left;\">",
-                 "       <div id=\"div_" + str(row['ID']) + "\" class=\"progress-bar\" role=\"progressbar\"",
-                 "            aria-valuenow=\"60\"",
-                 "            aria-valuemin=\"0\" aria-valuemax=\"100\">",
-                 "           <span id=\"span_" + str(row['ID']) + "\"></span>",
-                 "       </div>",
-                 "   </div>",
-                 "   <div class=\"form-group\" style=\"width: 10%; height: 18px; float: right;\">",
-                 "       <form method=\"post\">",
-                 "           <input type=\"hidden\" name=\"workflow_id\" value=\"" + str(workflow_detail.id) + "\">",
-                 "           <button id=\"btnstop_" + str(row['ID']) + "\" value=\"" + str(row['ID']) + "\"",
-                 "                   type=\"button\" class=\"close\" style=\"display: none\" title=\"停止pt-OSC进程\">",
-                 "               <span class=\"glyphicons glyphicons-stop\">&times;</span>",
-                 "           </button>",
-                 "       </form>",
-                 "   </div>",
-                 "</div>"])
     context = {'workflow_detail': workflow_detail, 'column_list': column_list, 'rows': rows,
                'is_can_review': is_can_review, 'is_can_execute': is_can_execute, 'is_can_timingtask': is_can_timingtask,
                'is_can_cancel': is_can_cancel, 'audit_auth_group': audit_auth_group,

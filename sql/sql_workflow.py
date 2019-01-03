@@ -29,7 +29,6 @@ from sql.utils.workflow import Workflow
 from .models import SqlWorkflow
 
 logger = logging.getLogger('default')
-sqlSHA1_cache = {}  # 存储SQL文本与SHA1值的对应关系，尽量减少与数据库的交互次数,提高效率。格式: {工单ID1:{SQL内容1:sqlSHA1值1, SQL内容2:sqlSHA1值2},}
 
 
 # 获取审核列表
@@ -560,80 +559,6 @@ def cancel(request):
     return HttpResponseRedirect(reverse('sql:detail', args=(workflow_id,)))
 
 
-def get_sql_sha1(workflow_id):
-    """
-    调用django ORM从数据库里查出review_content，从其中获取sqlSHA1值
-    """
-    workflow_detail = get_object_or_404(SqlWorkflow, pk=workflow_id)
-    dict_sha1 = {}
-    # 使用json.loads方法，把review_content从str转成list,
-    list_re_check_result = json.loads(workflow_detail.review_content)
-
-    for rownum in range(len(list_re_check_result)):
-        id = rownum + 1
-        sql_sha1 = list_re_check_result[rownum][10]
-        if sql_sha1 != '':
-            dict_sha1[id] = sql_sha1
-
-    if dict_sha1 != {}:
-        # 如果找到有sqlSHA1值，说明是通过pt-OSC操作的，将其放入缓存。
-        # 因为使用OSC执行的SQL占较少数，所以不设置缓存过期时间
-        sqlSHA1_cache[workflow_id] = dict_sha1
-    return dict_sha1
-
-
-def get_osc_percent(request):
-    """
-    获取该SQL的pt-OSC执行进度和剩余时间
-    """
-    workflow_id = request.POST['workflow_id']
-    sql_id = request.POST['sqlID']
-    if workflow_id == '' or workflow_id is None or sql_id == '' or sql_id is None:
-        context = {"status": -1, 'msg': 'workflow_id或sqlID参数为空.', "data": ""}
-        return HttpResponse(json.dumps(context), content_type='application/json')
-
-    workflow_id = int(workflow_id)
-    sql_id = int(sql_id)
-    dict_sha1 = {}
-    if workflow_id in sqlSHA1_cache:
-        dict_sha1 = sqlSHA1_cache[workflow_id]
-        # cachehit = "已命中"
-    else:
-        dict_sha1 = get_sql_sha1(workflow_id)
-
-    if dict_sha1 != {} and sql_id in dict_sha1:
-        sql_sha1 = dict_sha1[sql_id]
-        try:
-            result = InceptionDao().get_osc_percent(sql_sha1)  # 成功获取到SHA1值，去inception里面查询进度
-        except Exception as msg:
-            logger.error(traceback.format_exc())
-            result = {'status': 1, 'msg': msg, 'data': ''}
-            return HttpResponse(json.dumps(result), content_type='application/json')
-
-        if result["status"] == 0:
-            # 获取到进度值
-            pct_result = result
-        else:
-            # result["status"] == 1, 未获取到进度值,需要与workflow.execute_result对比，来判断是已经执行过了，还是还未执行
-            execute_result = SqlWorkflow.objects.get(id=workflow_id).execute_result
-            try:
-                list_exec_result = json.loads(execute_result)
-            except ValueError:
-                list_exec_result = execute_result
-            if type(list_exec_result) == list and len(list_exec_result) >= sql_id - 1:
-                if dict_sha1[sql_id] in list_exec_result[sql_id - 1][10]:
-                    # 已经执行完毕，进度值置为100
-                    pct_result = {"status": 0, "msg": "ok", "data": {"percent": 100, "timeRemained": ""}}
-            else:
-                # 可能因为前一条SQL是DML，正在执行中；或者还没执行到这一行。但是status返回的是4，而当前SQL实际上还未开始执行。这里建议前端进行重试
-                pct_result = {"status": -3, "msg": "进度未知", "data": {"percent": -100, "timeRemained": ""}}
-    elif dict_sha1 != {} and sql_id not in dict_sha1:
-        pct_result = {"status": 4, "msg": "该行SQL不是由pt-OSC执行的", "data": ""}
-    else:
-        pct_result = {"status": -2, "msg": "整个工单不由pt-OSC执行", "data": ""}
-    return HttpResponse(json.dumps(pct_result), content_type='application/json')
-
-
 def get_workflow_status(request):
     """
     获取某个工单的当前状态
@@ -648,41 +573,3 @@ def get_workflow_status(request):
     workflow_status = workflow_detail.status
     result = {"status": workflow_status, "msg": "", "data": ""}
     return HttpResponse(json.dumps(result), content_type='application/json')
-
-
-def stop_osc_progress(request):
-    """
-    中止该SQL的pt-OSC进程
-    """
-    workflow_id = request.POST['workflow_id']
-    sql_id = request.POST['sqlID']
-    if workflow_id == '' or workflow_id is None or sql_id == '' or sql_id is None:
-        context = {"status": -1, 'msg': 'workflow_id或sqlID参数为空.', "data": ""}
-        return HttpResponse(json.dumps(context), content_type='application/json')
-
-    workflow_detail = SqlWorkflow.objects.get(id=workflow_id)
-    # 服务器端二次验证，当前工单状态必须为等待人工审核,正在执行人工审核动作的当前登录用户必须为审核人. 避免攻击或被接口测试工具强行绕过
-    if workflow_detail.status != Const.workflowStatus['executing']:
-        context = {"status": -1, "msg": '当前工单状态不是"执行中"，请刷新当前页面！', "data": ""}
-        return HttpResponse(json.dumps(context), content_type='application/json')
-    if can_execute(request.user, workflow_id) is False:
-        context = {"status": -1, "msg": '你无权操作当前工单，请刷新当前页面！', "data": ""}
-        return HttpResponse(json.dumps(context), content_type='application/json')
-
-    workflow_id = int(workflow_id)
-    sql_id = int(sql_id)
-    if workflow_id in sqlSHA1_cache:
-        dict_sha1 = sqlSHA1_cache[workflow_id]
-    else:
-        dict_sha1 = get_sql_sha1(workflow_id)
-    if dict_sha1 != {} and sql_id in dict_sha1:
-        sql_sha1 = dict_sha1[sql_id]
-        try:
-            opt_result = InceptionDao().stop_osc_progress(sql_sha1)
-        except Exception as msg:
-            logger.error(traceback.format_exc())
-            result = {'status': 1, 'msg': msg, 'data': ''}
-            return HttpResponse(json.dumps(result), content_type='application/json')
-    else:
-        opt_result = {"status": 4, "msg": "不是由pt-OSC执行的", "data": ""}
-    return HttpResponse(json.dumps(opt_result), content_type='application/json')
